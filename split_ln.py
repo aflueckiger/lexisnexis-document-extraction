@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
+# Author: Alex Flückiger <alex.flueckiger@gmail.com>
+
 
 """
-Author of script: Alex Flückiger
+A information extraction script that takes a downloaded plain text file from LexisNexis
+and converts it into a proper CSV file. Wildcards such as *.txt may be used
+as script argument to process multiple files at once.
 
-This script was originally inspired by Neal Caren
+This script was originally inspired by Neal Caren:
 http://nealcaren.web.unc.edu/cleaning-up-lexisnexis-files/
 
-
-The script takes a downloaded plain text LexisNexis file and converts it into a CSV file.
-Wildcards such as *.txt may be used in the script argument to process multiple files.
-
-
+Example use case:
 python split_ln.py t*.txt
 
 Processing the following file:
@@ -28,7 +28,8 @@ Meta tags that are actually considered for this file:
  LENGTH
 
 Wrote the following file with 187 items:
- test.txt
+ test.csv
+
 """
 
 import re
@@ -129,12 +130,13 @@ def split_ln(fname, outname=None):
     documents = fcontent.split('END_OF_DOC')[:-1]
 
     # Figure out potential meta tags that might be reported
-    # Meta tags are capitalized and are stated at the beginning of a line
-    meta_tags = set(re.findall('\n([A-Z-]{3,}?):', fcontent))
+    # Meta tags are capitalized, stated at the beginning of a line
+    # and should consist of at leat 3 letters
+    meta_tags = set(re.findall('\n([A-Z-]{3,}?): ', fcontent))
 
     # Keep only the meta tags that are given for at least 20% of documents
     meta_tags = {tag for tag in meta_tags if (
-        fcontent.count(tag) / len(documents)) > .20}
+        fcontent.count(tag + ':') / len(documents)) > .20}
 
     # It is conceivable that the used pattern matches false positives such as the newspaper WELT or abbreviations.
     # Manually define these false positives here if this happens for your corpus.
@@ -182,20 +184,18 @@ def information_extraction_per_doc(doc, attributes):
     lines = [line for line in lines if line.lstrip().rstrip() is not (
         'Alle Rechte Vorbehalten' or 'All Rights Reserved')]
 
-    # Parse various meta information at the beginning of the document (e.g. in header above text)
-    # Parse document number for two different schemes that are possible
+    # Parse various meta information at the beginning of the document before text
+    # Parse document number according to two possible schemes
     for i, line in enumerate(lines):
         current_line = i
         match1 = re.search('do[k|c]ument (\d+)', line, re.I)
+        match2 = re.search('(\d+) (?:of|von) (?:\d+) do[k|c]ument', line, re.I)
         if match1:
             meta_dict['ID_DOC'] = match1.group(1)
             break
-        else:
-            match2 = re.search(
-                '(\d+) (?:of|von) (?:\d+) do[k|c]ument', line, re.I)
-            if match2:
-                meta_dict['ID_DOC'] = match2.group(1)
-                break
+        elif match2:
+            meta_dict['ID_DOC'] = match2.group(1)
+            break
 
     # Parse publication
     for line in lines[current_line + 1:]:
@@ -223,32 +223,28 @@ def information_extraction_per_doc(doc, attributes):
     # Extract further meta tags and text
     for line in lines[current_line + 1:]:
         # still look for tags, which are either in the header or footer section
-        match = re.match('([A-Z-]+?):', line)
+        match = re.match('([A-Z-]+?): ', line)
         if match:
             tag = match.group(1)
             if tag in attributes:
                 # save information according to defined meta tags
                 meta_dict[tag] = line.replace(match.group(0), '')
-            else:
-                # apparently it seems to be normal text that needs be saved as
-                # such
-                meta_dict['TEXT'] = meta_dict['TEXT'] + ' ' + line
-        else:
-            # save apparent text
-            meta_dict['TEXT'] = meta_dict['TEXT'] + ' ' + line
+                continue
+        # apparently it seems to be normal text
+        meta_dict['TEXT'] = meta_dict['TEXT'] + ' ' + line
 
     # Check mandatory attributes and length of text to ensure correct
     # extraction
-    if (meta_dict['ID_DOC'] or meta_dict['TITLE'] or meta_dict['DATE']) is None or len(meta_dict['TEXT']) < 100:
-        print('Please check the following document whose extracted information show an anomaly:')
+    if (meta_dict['ID_DOC'] or meta_dict['TITLE'] or meta_dict['DATE']) is None \
+            or len(meta_dict['TEXT']) < 100:
+        print('Please check the following document whose extracted information shows an anomaly:')
         print(meta_dict['ID_DOC'], meta_dict['TITLE'], meta_dict['DATE'])
 
     return meta_dict
 
 
 if __name__ == '__main__':
-    # All given filenames are saved into a list.
-    # Wildcards such as *.txt may be used
+    # All given filenames are saved into a list
     flist = sys.argv[1:]
 
     for fname in flist:
